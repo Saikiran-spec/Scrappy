@@ -1,75 +1,145 @@
 import time
-from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
-import spacy
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+import pandas as pd
 
-# Initialize spaCy NLP model
-nlp = spacy.load("en_core_web_sm")
+def chrome(headless=False):
+    # Create a Chrome service object with the updated path
+    service = Service(executable_path=r"C:\Users\chittyreddy saikiran\Downloads\chromedriver_win32\chromedriver.exe")  # Corrected path here
+    
+    # Set Chrome options
+    options = Options()
+    if headless:
+        options.add_argument("--headless")
+    
+    # Initialize the Chrome browser with service and options
+    driver = webdriver.Chrome(service=service, options=options)
+    driver.implicitly_wait(10)
+    return driver
 
-# Setup WebDriver using webdriver_manager to automatically handle the driver
-driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+# Pass False if you want to debug in visible mode
+browser = chrome(False)
 
-# LinkedIn Login Credentials (Never hardcode sensitive data in production)
-username = ""
-password = ""
+# Open LinkedIn login page
+browser.get('https://www.linkedin.com/uas/login')
+browser.implicitly_wait(3)
 
-# Function to login to LinkedIn
-def login():
-    driver.get("https://www.linkedin.com/login")
-    time.sleep(2)
+# Read login credentials from a file
+file = open('config.txt')
+lines = file.readlines()
+username = lines[0].strip()  # Remove any extra spaces or newline characters
+password = lines[1].strip()
 
-    # Input username and password
-    driver.find_element(By.ID, "username").send_keys(username)
-    driver.find_element(By.ID, "password").send_keys(password)
-    driver.find_element(By.XPATH, "//button[@type='submit']").click()
-    time.sleep(3)  # Wait for login to complete
+# Find and fill in the login form
+elementID = browser.find_element('id', 'username')
+elementID.send_keys(username)
 
-# Function to scrape profile data
-def scrape_profile():
-    driver.get("https://www.linkedin.com/in/your-profile/")  # Replace with target profile URL
-    time.sleep(3)
+elementID = browser.find_element('id', 'password')
+elementID.send_keys(password)
 
-    # Use BeautifulSoup to parse the page
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
+# Submit the login form
+elementID.submit()
 
-    # Extract profile name
-    profile_name = soup.find('h1', {'class': 'text-heading-xlarge'}).text.strip()
-    print(f"Profile Name: {profile_name}")
+info = []
 
-    # Scrape additional profile info (example: job title, location)
-    job_title = soup.find('div', {'class': 'text-body-medium'}).text.strip() if soup.find('div', {'class': 'text-body-medium'}) else "Not available"
-    print(f"Job Title: {job_title}")
+# List of LinkedIn profile links to scrape
+links = ['https://www.linkedin.com/in/saikiran-chittyreddy-3a8846231/']
 
-# Function to scrape messages
-def scrape_messages():
-    driver.get("https://www.linkedin.com/messaging/")  # LinkedIn messaging page
-    time.sleep(3)
+for link in links:
+    browser.get(link)
+    browser.implicitly_wait(1)
 
-    # Extract message data
-    messages = driver.find_elements(By.CSS_SELECTOR, ".msg-s-message-list")
-    for message in messages:
-        print(f"Message: {message.text}")
+    def scroll_down_page(speed=8):
+        current_scroll_position, new_height = 0, 1
+        while current_scroll_position <= new_height:
+            current_scroll_position += speed
+            browser.execute_script("window.scrollTo(0, {});".format(current_scroll_position))
+            new_height = browser.execute_script("return document.body.scrollHeight")
 
-# Function for NLP processing using spaCy
-def process_text(text):
-    doc = nlp(text)
-    for ent in doc.ents:
-        print(f"{ent.text} - {ent.label_}")  # Print named entities (e.g., people, organizations)
+    scroll_down_page(speed=8)
 
-# Main Execution
-if __name__ == "__main__":
-    login()
-    scrape_profile()
-    scrape_messages()
+    src = browser.page_source
+    soup = BeautifulSoup(src, 'lxml')
 
-    # Example: Use NLP processing on a scraped message
-    sample_message = "John Doe is working as a Software Engineer at XYZ Corp."
-    print("\nNLP Processing Output:")
-    process_text(sample_message)
+    # Get Name of the person
+    try:
+        name_div = soup.find('div', {'class': 'pv-text-details__left-panel mr5'})
+        first_last_name = name_div.find('h1').get_text().strip()
+    except:
+        first_last_name = None
+    
+    # Get Talks about section info
+    try:
+        talksAbout_tag = name_div.find('div', {'class': 'text-body-small t-black--light break-words pt1'})
+        talksAbout = talksAbout_tag.find('span').get_text().strip()
+    except:
+        talksAbout = None
+    
+    # Get Location of the Person
+    try:
+        location_tag = name_div.find('div', {'class': 'pb2'})
+        location = location_tag.find('span').get_text().strip()
+    except:
+        location = None
+    
+    # Get Title of the Person
+    try:
+        title = name_div.find('div', {'class': 'text-body-medium break-words'}).get_text().strip()
+    except:
+        title = None
+    
+    # Get Company Link of the Person
+    try:
+        exp_section = soup.find('section', {'id': 'experience-section'})
+        exp_section = exp_section.find('ul')
+        li_tags = exp_section.find('div')
+        a_tags = li_tags.find('a')
+        company_link = a_tags['href']
+        company_link = 'https://www.linkedin.com/' + company_link
+    except:
+        company_link = None
 
-    # Close the browser
-    driver.quit()
+    # Get Job Title of the Person
+    try:
+        job_title = li_tags.find('h3', {'class': 't-16 t-black t-bold'}).get_text().strip()
+    except:
+        job_title = None
+    
+    # Get Company Name of the Person
+    try:
+        company_name = li_tags.find('p', {'class': 'pv-entity__secondary-title t-14 t-black t-normal'}).get_text().strip()
+    except:
+        company_name = None
+
+    # Navigate to contact info page
+    contact_page = link + 'detail/contact-info/'
+    browser.get(contact_page)
+    browser.implicitly_wait(1)
+
+    contact_card = browser.page_source
+    contact_page = BeautifulSoup(contact_card, 'lxml')
+    
+    # Get LinkedIn Profile Link and Contact details of the Person
+    try:
+        contact_details = contact_page.find('section', {'class': 'pv-profile-section pv-contact-info artdeco-container-card ember-view'})
+        contacts = []
+        for a in contact_details.find_all('a', href=True):
+            contacts.append(a['href'])
+    except:
+        contacts = ['']
+
+    info.append([first_last_name, title, company_link, job_title, company_name, talksAbout, location, contacts])
+    time.sleep(5)
+
+# Define the column names for the CSV file
+column_names = ["Full Name", "Title", "Company URL", 'Job Title', 
+                'Company Name', 'Talks About', 'Location', 'Profile Link and Contact']
+
+# Create a DataFrame and save the data to a CSV file
+df = pd.DataFrame(info, columns=column_names)
+df.to_csv('data.csv', index=False)
+
+print(".................Done Scraping!.................")
+browser.quit()
